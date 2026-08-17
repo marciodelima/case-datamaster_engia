@@ -1,0 +1,119 @@
+name: Deploy Azure Functions
+
+on:
+  push:
+    paths:
+      - app/azure_functions/**
+    branches:
+      - main
+
+jobs:
+  deploy-functions:
+    runs-on: ubuntu-latest
+#        finance_csv_ingestor
+#        news_producer
+#        postgres_ingestor
+#        ri_collector
+#        news_sentiment_analyzer
+#        ri_resumer
+
+
+    env:
+      PYTHON_VERSION: '3.10'
+      FUNCTION_LIST: |
+        ri_resumer
+        news_sentiment_analyzer
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Azure Login
+        run: |
+          az login --service-principal \
+            -u ${{ secrets.AZURE_CLIENT_ID }} \
+            -p ${{ secrets.AZURE_CLIENT_SECRET }} \
+            --tenant ${{ secrets.AZURE_TENANT_ID }}
+
+      - name: Parse AZURE_CREDENTIALS JSON
+        run: |
+          echo '${{ secrets.AZURE_CREDENTIALS }}' > azure_credentials.json
+          echo "ARM_CLIENT_ID=$(jq -r .clientId azure_credentials.json)" >> $GITHUB_ENV
+          echo "ARM_CLIENT_SECRET=$(jq -r .clientSecret azure_credentials.json)" >> $GITHUB_ENV
+          echo "ARM_SUBSCRIPTION_ID=$(jq -r .subscriptionId azure_credentials.json)" >> $GITHUB_ENV
+          echo "ARM_TENANT_ID=$(jq -r .tenantId azure_credentials.json)" >> $GITHUB_ENV
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Instalar .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install black pytest pytest-cov
+
+      - name: Install Azure Functions Core Tools
+        run: |
+          npm install -g azure-functions-core-tools@4 --unsafe-perm true
+
+      - name: Deploy Functions Sequentially
+        run: |
+          for FUNC in $FUNCTION_LIST; do
+            echo "Deploying function: $FUNC"
+
+            echo "Format code"
+            black app/azure_functions/$FUNC
+
+            echo "Install dependencies"
+            pip install --prefer-binary -r app/azure_functions/$FUNC/requirements.txt
+
+            echo "Run unit tests with coverage"
+            pytest app/azure_functions/$FUNC \
+              --maxfail=1 --disable-warnings --exitfirst \
+              --cov=app/azure_functions/$FUNC \
+              --cov-report=term-missing \
+              --cov-fail-under=50
+
+            NORMALIZED_NAME=$(echo "$FUNC" | sed 's/_/-/g')-func1
+            echo "Normalized name: $NORMALIZED_NAME"
+
+            echo "Parando a Function App..."
+            az functionapp stop --name $NORMALIZED_NAME --resource-group ${{ secrets.RSG }} || true
+
+            echo "Gerando pacote Python local (.python_packages)"
+            mkdir -p app/azure_functions/$FUNC/.python_packages/lib/site-packages
+            pip install --target app/azure_functions/$FUNC/.python_packages/lib/site-packages \
+              --prefer-binary -r app/azure_functions/$FUNC/requirements.txt
+            
+            echo "Publicando com --no-build (com até 3 tentativas)"
+            cd app/azure_functions/$FUNC
+            
+            for i in 1 2 3; do
+              echo "Tentativa $i de deploy para $NORMALIZED_NAME..."
+              func azure functionapp publish $NORMALIZED_NAME --python --no-build && break
+              echo "Deploy falhou na tentativa $i. Aguardando 15 segundos..."
+              sleep 15
+            done
+            cd -
+
+            echo "Iniciando a Function App..."
+            az functionapp start --name $NORMALIZED_NAME --resource-group ${{ secrets.RSG }} || true
+
+            echo "Aguardando 30 segundos antes do próximo deploy..."
+            sleep 30
+          done
+

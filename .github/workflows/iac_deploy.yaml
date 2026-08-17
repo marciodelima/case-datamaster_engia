@@ -1,0 +1,79 @@
+name: Deploy Terraform IAC
+
+on:
+  push:
+    paths:
+      - iac/infra/**
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    defaults:
+      run:
+        working-directory: iac/infra
+
+    environment: production
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Azure Login
+      run: |
+        az login --service-principal \
+          -u ${{ secrets.AZURE_CLIENT_ID }} \
+          -p ${{ secrets.AZURE_CLIENT_SECRET }} \
+          --tenant ${{ secrets.AZURE_TENANT_ID }}
+
+    - name: Validate JSON
+      run: |
+         echo '${{ secrets.AZURE_CREDENTIALS }}' > azure_credentials.json
+         jq . azure_credentials.json
+
+    - name: Parse AZURE_CREDENTIALS JSON
+      run: |
+            echo '${{ secrets.AZURE_CREDENTIALS }}' > azure_credentials.json
+            
+            export ARM_CLIENT_ID=$(jq -r .clientId azure_credentials.json)
+            export ARM_CLIENT_SECRET=$(jq -r .clientSecret azure_credentials.json)
+            export ARM_SUBSCRIPTION_ID=$(jq -r .subscriptionId azure_credentials.json)
+            export ARM_TENANT_ID=$(jq -r .tenantId azure_credentials.json)
+            
+            echo "ARM_CLIENT_ID=$ARM_CLIENT_ID" >> $GITHUB_ENV
+            echo "ARM_CLIENT_SECRET=$ARM_CLIENT_SECRET" >> $GITHUB_ENV
+            echo "ARM_SUBSCRIPTION_ID=$ARM_SUBSCRIPTION_ID" >> $GITHUB_ENV
+            echo "ARM_TENANT_ID=$ARM_TENANT_ID" >> $GITHUB_ENV
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.13.1
+
+    - name: Terraform Format
+      run: terraform fmt -recursive
+
+    - name: Terraform Format Check
+      run: terraform fmt -check
+
+    - name: Terraform Init com backend remoto
+      run: |
+        terraform init -upgrade \
+                      -backend-config="resource_group_name=${{ secrets.RSG }}" \
+                      -backend-config="storage_account_name=${{ secrets.IAC_NAME_STORAGE }}" \
+                      -backend-config="container_name=tfstate" \
+                      -backend-config="key=terraform.tfstate"
+
+    - name: Terraform Validate
+      run: terraform validate
+
+    - name: Terraform Plan
+      run: terraform plan -out=tfplan
+
+    - name: Terraform Apply
+      run: terraform apply -auto-approve tfplan
+
+    - name: Export Terraform Outputs
+      run: terraform output -json > tfoutputs.json

@@ -1,0 +1,36 @@
+name: Deploy Angular Frontend
+
+on:
+  push:
+    paths:
+      - 'app/frontend/**'
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: cd app/frontend && npm install
+
+      - name: Build Angular
+        run: cd app/frontend && npm run build --prod
+
+      - name: Deploy to Azure
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: frontend-investimentos
+          slot-name: production
+          publish-profile: ${{ secrets.AZURE_FRONTEND_PUBLISH_PROFILE }}
+          package: app/frontend/dist/*
+
