@@ -58,6 +58,22 @@ O gateway aceita `POST /v1/agent/run` com:
 
 O reasoner do MCP seleciona até três ferramentas por requisição e devolve um contexto consolidado. O gateway chama o MCP em `MCP_URL` (padrão `http://localhost:8100/v1/context`); em execução local, configure `MCP_URL=http://localhost:8101/v1/context` para não conflitar com a porta do gateway.
 
+### LLM do MCP
+
+O MCP usa `gpt-4o-mini` como padrão por oferecer boa qualidade em português, baixa latência e custo adequado para planejamento e síntese. O acesso é OpenAI-compatible e configurável sem segredo no código:
+
+```bash
+export OPENAI_API_KEY="..."
+export LLM_MODEL="gpt-4o-mini"
+export JUDGE_MODEL="gpt-4.1-mini"
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+docker compose up --build
+```
+
+O LLM recebe apenas a pergunta e o contexto das ferramentas. Ele não chama a internet diretamente, não escolhe ferramentas fora da allowlist e não executa código. O planner retorna JSON validado, limitado a três ferramentas. Sem `OPENAI_API_KEY`, o MCP usa o planner determinístico e uma resposta de fallback.
+
+Depois da síntese, um juiz independente (`gpt-4.1-mini`) avalia groundedness, presença de fontes, segurança e clareza. O limiar mínimo é `0.75`; respostas reprovadas são retidas e substituídas por uma mensagem segura. Se o juiz estiver indisponível, o retorno registra explicitamente o fallback em `judge.issues`.
+
 ## Segurança inicial
 
 - Contratos Pydantic rejeitam campos inválidos.

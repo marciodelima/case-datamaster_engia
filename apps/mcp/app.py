@@ -9,6 +9,8 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
+from mcp.llm import judge_model_name, judge_response, model_name, plan_tools, synthesize
+
 ROOT = Path(__file__).resolve().parent.parent
 AGENTS_ROOT = ROOT / "agents"
 
@@ -26,9 +28,12 @@ class MCPContext(BaseModel):
     trace_id: str
     status: str
     answer: str
+    planner: str
+    plan: list[str]
     tools_called: list[str]
     observations: list[dict[str, Any]]
     sources: list[str] = Field(default_factory=list)
+    judge: dict[str, Any] = Field(default_factory=dict)
 
 
 TOOL_PATHS = {
@@ -73,23 +78,51 @@ def reason(message: str, explicit_intent: str | None) -> list[str]:
 
 
 def execute(request: MCPRequest) -> MCPContext:
-    selected_tools = reason(request.message, request.intent)
+    llm_plan = plan_tools(request.message, request.ticker, request.intent)
+    planner = "llm" if llm_plan else "fallback"
+    selected_tools = llm_plan or reason(request.message, request.intent)
+    selected_tools = [tool for tool in selected_tools if tool in TOOLS][:3]
+    if not selected_tools:
+        selected_tools = ["portfolio"]
+
     observations: list[dict[str, Any]] = []
     sources: list[str] = []
-    for tool_name in selected_tools[:3]:
+    for tool_name in selected_tools:
         payload = request.model_dump()
         payload["parameters"] = {**request.parameters, "reason": request.message}
-        observation = TOOLS[tool_name](payload)
+        try:
+            observation = TOOLS[tool_name](payload)
+            status = "ok"
+        except Exception as exc:
+            observation = {"error": "Tool execution failed", "tool": tool_name}
+            status = "error"
         observations.append({"tool": tool_name, "result": observation})
-        sources.extend(observation.get("sources", []))
-    answer = "Contexto consolidado pelas ferramentas: " + ", ".join(selected_tools[:3])
+        if status == "ok":
+            sources.extend(observation.get("sources", []))
+
+    unique_sources = list(dict.fromkeys(sources))
+    answer = synthesize(request.message, observations, unique_sources)
+    if not answer:
+        answer = "Contexto consolidado pelas ferramentas: " + ", ".join(selected_tools)
+        answer += ". Conteúdo educacional; não constitui recomendação financeira."
+    answer = f"[{model_name()} | planner={planner}] {answer}"
+    judge = judge_response(request.message, answer, observations, unique_sources)
+    if not judge["approved"]:
+        answer = (
+            "A resposta foi retida pelo juiz de qualidade por não atingir o nível mínimo de "
+            "groundedness, segurança ou clareza. Consulte as observações e fontes disponíveis. "
+            "Conteúdo educacional; não constitui recomendação financeira."
+        )
     return MCPContext(
         trace_id=request.trace_id,
         status="ok",
         answer=answer,
-        tools_called=selected_tools[:3],
+        planner=planner,
+        plan=selected_tools,
+        tools_called=selected_tools,
         observations=observations,
-        sources=list(dict.fromkeys(sources)),
+        sources=unique_sources,
+        judge=judge,
     )
 
 
@@ -98,7 +131,13 @@ app = FastAPI(title="Data Master Unified MCP", version="0.2.0")
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"status": "ok", "service": "mcp", "tools": list(TOOLS)}
+    return {
+        "status": "ok",
+        "service": "mcp",
+        "tools": list(TOOLS),
+        "model": model_name(),
+        "judge_model": judge_model_name(),
+    }
 
 
 @app.post("/v1/context", response_model=MCPContext)

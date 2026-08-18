@@ -60,6 +60,11 @@ services:
       dockerfile: apps/mcp/Dockerfile
     expose:
       - "8101"
+    environment:
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      JUDGE_MODEL: ${JUDGE_MODEL:-gpt-4.1-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     networks:
       - services
     healthcheck:
