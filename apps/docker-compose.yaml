@@ -1,0 +1,77 @@
+services:
+  frontend:
+    build:
+      context: ..
+      dockerfile: apps/front-end/Dockerfile
+    ports:
+      - "8501:8501"
+    environment:
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - public
+      - services
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: apps/backend/Dockerfile
+    expose:
+      - "8000"
+    networks:
+      - services
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: apps/gateway/Dockerfile
+    ports:
+      - "8100:8100"
+    environment:
+      MCP_URL: http://mcp:8101/v1/context
+    depends_on:
+      mcp:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks:
+      - public
+      - services
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: apps/mcp/Dockerfile
+    expose:
+      - "8101"
+    networks:
+      - services
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  public:
+    driver: bridge
+  services:
+    driver: bridge
+    internal: true
