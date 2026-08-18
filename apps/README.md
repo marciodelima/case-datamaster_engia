@@ -68,7 +68,11 @@ export LLM_MODEL="gpt-4o-mini"
 export JUDGE_MODEL="gpt-4.1-mini"
 export OPENAI_BASE_URL="https://api.openai.com/v1"
 export MCP_SERVICE_TOKEN="gere-um-token-forte"
+export JWT_SECRET="gere-outro-segredo-forte"
+export GATEWAY_JWT_TOKEN="jwt-assinado-para-o-client-id"
 docker compose up --build
+
+O token enviado pelo frontend deve conter ao menos `sub`, `iat` e `exp`; o `sub` deve ser igual ao `client_id` enviado na requisição. O segredo JWT não deve ser compartilhado com o navegador; em produção, o token deve ser emitido por um provedor de identidade e entregue ao frontend por um fluxo OIDC/OAuth2.
 ```
 
 O LLM recebe apenas a pergunta e o contexto das ferramentas. Ele não chama a internet diretamente, não escolhe ferramentas fora da allowlist e não executa código. O planner retorna JSON validado, limitado a três ferramentas. Sem `OPENAI_API_KEY`, o MCP usa o planner determinístico e uma resposta de fallback.
@@ -87,11 +91,13 @@ O gateway injeta esse header usando `create_mcp_http_client`. O frontend nunca r
 
 ### Memória de chat
 
-O Gateway é o único dono da memória de curto prazo. Cada requisição recebe `client_id` e `session_id`, e o Gateway mantém uma memória separada pela chave composta `(client_id, session_id)`. A memória possui no máximo 20 mensagens e TTL de 120 minutos.
+O Gateway é o único dono da memória de curto prazo, armazenada no Redis. A memória é indexada somente por `client_id`, para sobreviver à troca de `session_id` ou ao fechamento do browser. O `session_id` continua sendo usado para rastreabilidade da requisição, mas não define a memória. Cada cliente possui no máximo 20 mensagens e TTL de 120 minutos.
 
-O MCP é stateless: não armazena mensagens. Ele recebe somente o snapshot limitado e autorizado pelo Gateway, usa esse contexto durante a execução e o descarta ao finalizar a requisição. Isso evita estado duplicado, divergência e mistura de conversas.
+O MCP é stateless: não armazena mensagens. Ele recebe somente o snapshot limitado e autorizado pelo Gateway, usa esse contexto durante a execução e o descarta ao finalizar a requisição. Isso evita estado duplicado, divergência e mistura entre clientes.
 
-O gateway devolve o `session_id` na resposta. A aplicação deve guardar esse valor durante a conversa e enviá-lo nas próximas chamadas do mesmo chat. Para um novo chat, gere um novo `session_id`.
+O Compose cria o serviço `redis` com volume persistente `redis-data`; o Gateway acessa Redis pela variável `REDIS_URL`. Em produção, use autenticação/TLS do Redis gerenciado e substitua o volume local por um serviço gerenciado.
+
+O gateway devolve o `session_id` na resposta para rastreabilidade. A aplicação pode gerar um novo `session_id` ao reiniciar, sem perder o histórico do cliente.
 
 ## Segurança inicial
 

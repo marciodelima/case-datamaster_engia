@@ -5,8 +5,10 @@ from uuid import uuid4
 from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 from fastapi import FastAPI, HTTPException
+from fastapi import Depends
 from pydantic import BaseModel, Field
 
+from gateway.auth import require_jwt
 from gateway.guardrails import guard_input, guard_output
 from gateway.memory import memory
 
@@ -27,12 +29,18 @@ class GatewayRequest(BaseModel):
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "service": "gateway", "mcp_url": MCP_URL}
+async def health():
+    try:
+        redis_ok = await memory.ping()
+    except Exception:
+        redis_ok = False
+    return {"status": "ok" if redis_ok else "degraded", "service": "gateway", "mcp_url": MCP_URL, "redis": redis_ok}
 
 
 @app.post("/v1/agent/run")
-async def run_agent(request: GatewayRequest):
+async def run_agent(request: GatewayRequest, claims: dict = Depends(require_jwt)):
+    if request.client_id != claims["client_id"]:
+        raise HTTPException(status_code=403, detail="JWT client identity does not match request client_id")
     allowed, reason = guard_input(request.message)
     if not allowed:
         raise HTTPException(status_code=400, detail=reason)
@@ -44,8 +52,8 @@ async def run_agent(request: GatewayRequest):
     payload = request.model_dump(exclude_none=True)
     payload["trace_id"] = trace_id
     payload["session_id"] = session_id
-    payload["history"] = memory.history(request.client_id, session_id)
-    memory.append(request.client_id, session_id, "user", request.message)
+    payload["history"] = await memory.history(request.client_id)
+    await memory.append(request.client_id, "user", request.message)
     try:
         async with create_mcp_http_client(
             headers={"Authorization": f"Bearer {MCP_SERVICE_TOKEN}"}
@@ -74,5 +82,5 @@ async def run_agent(request: GatewayRequest):
     allowed, reason = guard_output(context)
     if not allowed:
         raise HTTPException(status_code=502, detail=reason)
-    memory.append(request.client_id, session_id, "assistant", context.get("answer", ""))
+    await memory.append(request.client_id, "assistant", context.get("answer", ""))
     return {"trace_id": trace_id, "client_id": request.client_id, "session_id": session_id, "status": "ok", "context": context}

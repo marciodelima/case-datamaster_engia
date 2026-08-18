@@ -8,6 +8,8 @@ services:
     environment:
       STREAMLIT_SERVER_HEADLESS: "true"
       STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+      GATEWAY_URL: http://gateway:8100
+      GATEWAY_JWT_TOKEN: ${GATEWAY_JWT_TOKEN:-}
     depends_on:
       gateway:
         condition: service_healthy
@@ -40,10 +42,15 @@ services:
     environment:
       MCP_URL: http://mcp:8101/mcp
       MCP_SERVICE_TOKEN: ${MCP_SERVICE_TOKEN:-local-development-token}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ALGORITHM: HS256
     depends_on:
       mcp:
         condition: service_healthy
       backend:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - public
@@ -76,9 +83,28 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    expose:
+      - "6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - services
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
 networks:
   public:
     driver: bridge
   services:
     driver: bridge
     internal: true
+
+volumes:
+  redis-data:
