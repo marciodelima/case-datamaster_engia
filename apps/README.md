@@ -56,7 +56,7 @@ O gateway aceita `POST /v1/agent/run` com:
 }
 ```
 
-O reasoner do MCP seleciona até três ferramentas por requisição e devolve um contexto consolidado. O gateway chama o MCP em `MCP_URL` (padrão `http://localhost:8100/v1/context`); em execução local, configure `MCP_URL=http://localhost:8101/v1/context` para não conflitar com a porta do gateway.
+O reasoner do MCP seleciona até três ferramentas por requisição e devolve um contexto consolidado. O gateway é o cliente MCP e chama o servidor pelo transporte Streamable HTTP em `MCP_URL` (padrão `http://localhost:8101/mcp`).
 
 ### LLM do MCP
 
@@ -67,12 +67,29 @@ export OPENAI_API_KEY="..."
 export LLM_MODEL="gpt-4o-mini"
 export JUDGE_MODEL="gpt-4.1-mini"
 export OPENAI_BASE_URL="https://api.openai.com/v1"
+export MCP_SERVICE_TOKEN="gere-um-token-forte"
 docker compose up --build
 ```
 
 O LLM recebe apenas a pergunta e o contexto das ferramentas. Ele não chama a internet diretamente, não escolhe ferramentas fora da allowlist e não executa código. O planner retorna JSON validado, limitado a três ferramentas. Sem `OPENAI_API_KEY`, o MCP usa o planner determinístico e uma resposta de fallback.
 
 Depois da síntese, um juiz independente (`gpt-4.1-mini`) avalia groundedness, presença de fontes, segurança e clareza. O limiar mínimo é `0.75`; respostas reprovadas são retidas e substituídas por uma mensagem segura. Se o juiz estiver indisponível, o retorno registra explicitamente o fallback em `judge.issues`.
+
+### Autorização Gateway -> MCP
+
+O MCP aceita somente requisições Streamable HTTP com:
+
+```text
+Authorization: Bearer <MCP_SERVICE_TOKEN>
+```
+
+O gateway injeta esse header usando `create_mcp_http_client`. O frontend nunca recebe esse token e a porta do MCP não é publicada pelo Compose, apenas exposta na rede interna `services`. Em produção, substitua o valor local por um segredo do Key Vault/secret manager e use um token forte, rotacionável e exclusivo por ambiente.
+
+### Memória de chat
+
+Cada requisição recebe `client_id` e `session_id`. O gateway e o MCP mantêm uma memória curta separada pela chave composta `(client_id, session_id)`. A memória possui no máximo 20 mensagens e TTL de 120 minutos; ela existe somente enquanto o processo/container estiver ativo e não é compartilhada entre clientes ou sessões.
+
+O gateway devolve o `session_id` na resposta. A aplicação deve guardar esse valor durante a conversa e enviá-lo nas próximas chamadas do mesmo chat. Para um novo chat, gere um novo `session_id`.
 
 ## Segurança inicial
 

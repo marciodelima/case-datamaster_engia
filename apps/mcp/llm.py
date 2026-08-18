@@ -78,11 +78,17 @@ def plan_tools(message: str, ticker: str | None, explicit_intent: str | None) ->
         return None
 
 
-def synthesize(message: str, observations: list[dict[str, Any]], sources: list[str]) -> str | None:
+def synthesize(
+    message: str,
+    observations: list[dict[str, Any]],
+    sources: list[str],
+    history: list[dict[str, Any]] | None = None,
+) -> str | None:
     context = {
         "question": message,
         "observations": observations,
         "sources": sources,
+        "short_term_memory": (history or [])[-20:],
         "requirements": [
             "responder em português brasileiro",
             "ser claro e objetivo",

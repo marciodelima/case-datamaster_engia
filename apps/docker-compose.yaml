@@ -38,7 +38,8 @@ services:
     ports:
       - "8100:8100"
     environment:
-      MCP_URL: http://mcp:8101/v1/context
+      MCP_URL: http://mcp:8101/mcp
+      MCP_SERVICE_TOKEN: ${MCP_SERVICE_TOKEN:-local-development-token}
     depends_on:
       mcp:
         condition: service_healthy
@@ -65,10 +66,11 @@ services:
       JUDGE_MODEL: ${JUDGE_MODEL:-gpt-4.1-mini}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MCP_SERVICE_TOKEN: ${MCP_SERVICE_TOKEN:-local-development-token}
     networks:
       - services
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8101/health')"]
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8101), 2).close()"]
       interval: 10s
       timeout: 3s
       retries: 5
