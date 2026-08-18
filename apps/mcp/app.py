@@ -104,14 +104,14 @@ def execute(request: MCPRequest) -> MCPContext:
     answer = synthesize(request.message, observations, unique_sources)
     if not answer:
         answer = "Contexto consolidado pelas ferramentas: " + ", ".join(selected_tools)
-        answer += ". Conteúdo educacional; não constitui recomendação financeira."
+        answer += ". Esse conteúdo não constitui recomendação financeira."
     answer = f"[{model_name()} | planner={planner}] {answer}"
     judge = judge_response(request.message, answer, observations, unique_sources)
     if not judge["approved"]:
         answer = (
             "A resposta foi retida pelo juiz de qualidade por não atingir o nível mínimo de "
             "groundedness, segurança ou clareza. Consulte as observações e fontes disponíveis. "
-            "Conteúdo educacional; não constitui recomendação financeira."
+            "Esse conteúdo não constitui recomendação financeira."
         )
     return MCPContext(
         trace_id=request.trace_id,
