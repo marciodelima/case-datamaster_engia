@@ -18,11 +18,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 try:
-    from service.memory import memory
-except ModuleNotFoundError:
-    from memory import memory
-
-try:
     from service.llm import judge_model_name, judge_response, model_name, plan_tools, synthesize
 except ModuleNotFoundError:
     from llm import judge_model_name, judge_response, model_name, plan_tools, synthesize
@@ -98,8 +93,8 @@ def reason(message: str, explicit_intent: str | None) -> list[str]:
 
 
 def execute(request: MCPRequest) -> MCPContext:
-    history = memory.history(request.client_id, request.session_id)
-    memory.append(request.client_id, request.session_id, "user", request.message)
+    # Memory is owned by the Gateway; MCP only consumes its bounded snapshot.
+    history = request.history[-20:]
     llm_plan = plan_tools(request.message, request.ticker, request.intent)
     planner = "llm" if llm_plan else "fallback"
     selected_tools = llm_plan or reason(request.message, request.intent)
@@ -135,7 +130,6 @@ def execute(request: MCPRequest) -> MCPContext:
             "groundedness, segurança ou clareza. Consulte as observações e fontes disponíveis. "
             "Esse conteúdo não constitui recomendação financeira."
         )
-    memory.append(request.client_id, request.session_id, "assistant", answer)
     return MCPContext(
         trace_id=request.trace_id,
         client_id=request.client_id,

@@ -87,7 +87,9 @@ O gateway injeta esse header usando `create_mcp_http_client`. O frontend nunca r
 
 ### Memória de chat
 
-Cada requisição recebe `client_id` e `session_id`. O gateway e o MCP mantêm uma memória curta separada pela chave composta `(client_id, session_id)`. A memória possui no máximo 20 mensagens e TTL de 120 minutos; ela existe somente enquanto o processo/container estiver ativo e não é compartilhada entre clientes ou sessões.
+O Gateway é o único dono da memória de curto prazo. Cada requisição recebe `client_id` e `session_id`, e o Gateway mantém uma memória separada pela chave composta `(client_id, session_id)`. A memória possui no máximo 20 mensagens e TTL de 120 minutos.
+
+O MCP é stateless: não armazena mensagens. Ele recebe somente o snapshot limitado e autorizado pelo Gateway, usa esse contexto durante a execução e o descarta ao finalizar a requisição. Isso evita estado duplicado, divergência e mistura de conversas.
 
 O gateway devolve o `session_id` na resposta. A aplicação deve guardar esse valor durante a conversa e enviá-lo nas próximas chamadas do mesmo chat. Para um novo chat, gere um novo `session_id`.
 
